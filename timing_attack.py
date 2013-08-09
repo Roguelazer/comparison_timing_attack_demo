@@ -1,14 +1,21 @@
 import gc
+import hashlib
 import math
 import numpy
 import optparse
 import random
 import sys
-import time
+
+try:
+    import time33
+    timer = time33.perf_counter
+except:
+    import time
+    timer = time.clock
 
 
 def compare_character(got, expected):
-    return ord(unichr(got)) == ord(unichr(expected))
+    return got == expected
 
 
 def compare_token(got, expected):
@@ -21,7 +28,8 @@ def compare_token(got, expected):
     for i in xrange(len(got)):
         if not compare_character(got[i], expected[i]):
             return False
-    return True
+    # just to be extra sure, also compare the hashes
+    return hashlib.sha1(''.join(got)).hexdigest() == hashlib.sha1(''.join(expected)).hexdigest()
 
 
 def guess_and_time(init_guess, expected, iterations, token_length):
@@ -41,9 +49,9 @@ def guess_and_time(init_guess, expected, iterations, token_length):
         m_N += 1
         # fill with rotating data to avoid biasing the results
         guess = init_guess + [i % 10 for _ in tofill]
-        start = time.time()
+        start = timer()
         compare_token(guess, expected)
-        end = time.time()
+        end = timer()
         this_time = (1000000.0 * (end - start))
 
         if (m_N == 1):
@@ -60,16 +68,18 @@ def guess_and_time(init_guess, expected, iterations, token_length):
 
 def main():
     parser = optparse.OptionParser()
-    parser.add_option('-i', '--iterations', default=5000000, type=int, help='Number of iterations to run for (default %default)')
-    parser.add_option('-c', '--confidence-threshold', default=0.2, type=float, help='How to low to get confidence get before aborting (default %default)')
+    parser.add_option('-i', '--iterations', default=25000, type=int, help='Number of iterations to run for (default %default)')
+    parser.add_option('-c', '--confidence-threshold', default=1, type=float, help='How to low to get confidence get before aborting (default %default)')
     parser.add_option('-t', '--token-length', default=5, type=int, help='How long to make the token (default %default, ignored if you pass --token)')
-    parser.add_option('--token', default=None, type=str, help='The token to use (default: randomly generated)')
+    parser.add_option('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_option('-n', '--numeric', default=False, action='store_true', help='Only generate numeric tokens')
     opts, args = parser.parse_args()
 
-    if opts.token is not None:
-        expected = map(int, opts.token.split())
+    if opts.numeric:
+        language = map(str, range(10))
     else:
-        expected = [random.choice(range(10)) for i in range(opts.token_length)]
+        language = map(chr, range(ord('a'), ord('z')+1) + range(ord('A'), ord('Z') + 1) + range(ord('0'), ord('9') + 1))
+    expected = [random.choice(language) for i in range(opts.token_length)]
 
     token_length = len(expected)
 
@@ -82,7 +92,7 @@ def main():
         sys.stdout.write("> ")
         sys.stdout.flush()
         all_times = []
-        for digit in range(10):
+        for digit in language:
             guess = overall_guess + [digit]
             time, std = guess_and_time(guess, expected, opts.iterations, token_length)
             all_times.append((digit, time, std))
@@ -90,14 +100,18 @@ def main():
             sys.stdout.flush()
         sys.stdout.write("\n")
 
-        print all_times
         average_time = numpy.mean([t[1] for t in all_times])
+        all_stdev = numpy.std([t[1] for t in all_times])
         all_times.sort(key=lambda (d, t, s): t - average_time, reverse=True)
+        if opts.verbose:
+            print all_times
         digit, time, stdev = all_times[0]
         delta = time - average_time
         # how many standard deviations away are we?
-        confidence = delta / stdev
-        print "Will guess %d (in %.1f +/- %0.1f micros, average %.1f micros cf=%f)" % (digit, time, stdev, average_time, confidence)
+        confidence = delta / all_stdev
+        if opts.verbose:
+            print all_times
+        print "Will guess %s (in %.1f +/- %0.1f micros, average %.1f +/- %0.1f micros cf=%f)" % (digit, time, stdev, average_time, all_stdev, confidence)
         if confidence < opts.confidence_threshold:
             print "Confidence too low, aborting"
             break
